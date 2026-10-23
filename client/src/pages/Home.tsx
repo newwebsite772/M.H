@@ -33,8 +33,9 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useLocation } from "wouter";
+import { trpc } from "@/lib/trpc";
 
 type Status = "مؤكد" | "قيد التنفيذ" | "مكتمل" | "معلق" | "ملغي" | "متأخر";
 
@@ -281,7 +282,38 @@ export default function Home() {
   const currentPath = location === "/" ? "/" : location;
   const activeMeta = moduleMeta[currentPath];
 
-  const saveBooking = (booking: Booking) => { setBookings((current) => [booking, ...current]); setModalOpen(false); setLocation("/bookings"); };
+  const bookingsQuery = trpc.bookings.list.useQuery(undefined, { retry: false });
+  const createBookingMutation = trpc.bookings.create.useMutation();
+
+  const mapBooking = (booking: NonNullable<typeof bookingsQuery.data>[number]): Booking => ({
+    id: booking.id,
+    customer: booking.customer ?? "عميل غير معروف",
+    service: booking.service ?? "خدمة غير محددة",
+    city: booking.city ?? "",
+    date: new Intl.DateTimeFormat("ar-SA", { day: "numeric", month: "short" }).format(new Date(booking.scheduledAt)),
+    time: new Intl.DateTimeFormat("ar-SA", { hour: "2-digit", minute: "2-digit" }).format(new Date(booking.scheduledAt)),
+    team: booking.team ?? "غير محدد",
+    amount: Number(booking.amount),
+    status: ({ confirmed: "مؤكد", in_progress: "قيد التنفيذ", completed: "مكتمل", pending: "معلق", cancelled: "ملغي" } as const)[booking.status] ?? "مؤكد",
+  });
+
+  useEffect(() => {
+    if (bookingsQuery.data) setBookings(bookingsQuery.data.map(mapBooking));
+  }, [bookingsQuery.data]);
+
+  const saveBooking = (booking: Booking) => {
+    createBookingMutation.mutate({
+      customerName: booking.customer,
+      serviceName: booking.service,
+      city: booking.city,
+      scheduledAt: new Date(`${new Date().toISOString().slice(0, 10)}T10:00:00`),
+      teamName: booking.team,
+      amount: booking.amount,
+      status: "confirmed",
+    }, {
+      onSuccess: () => { setModalOpen(false); setLocation("/bookings"); void bookingsQuery.refetch(); },
+    });
+  };
   const navigate = (path: string) => { setLocation(path); setSidebarOpen(false); };
 
   return <div className="app-shell" dir="rtl">
